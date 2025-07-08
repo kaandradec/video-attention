@@ -230,11 +230,4 @@ class VideoAttentionPage:
     def update_time_loop(self):
         while self.timer_running:
             self.update_time_text()
-            time.sleep(0.5)
-
-    # def start_ws_server(self):
-    #     def on_play():
-    #         if hasattr(self, 'drowsiness_page'):
-    #             self.drowsiness_page.start_detection(None)
-    #     print("Iniciando servidor websocket en ws://localhost:8765")
-    #     asyncio.run(monitor_ws_server(on_play)) 
+            time.sleep(0.5) 

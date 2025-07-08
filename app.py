@@ -5,6 +5,8 @@ from drowsiness_processor.main import DrowsinessDetectionSystem
 import os
 import boto3
 from botocore.client import Config
+from fastapi.responses import StreamingResponse
+from typing import List
 
 # Configuración de MinIO/S3
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
@@ -72,4 +74,26 @@ async def save_attention_log(file: UploadFile = File(...)):
         return {"status": "ok", "s3_path": f"s3://{MINIO_BUCKET}/{filename}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/list_reports")
+def list_reports() -> List[str]:
+    """Lista los archivos CSV en el bucket de MinIO (reports)."""
+    try:
+        response = s3_client.list_objects_v2(Bucket=MINIO_BUCKET)
+        files = [item['Key'] for item in response.get('Contents', []) if item['Key'].endswith('.csv')]
+        return files
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/get_report")
+def get_report(filename: str):
+    """Descarga un archivo CSV específico desde MinIO."""
+    try:
+        obj = s3_client.get_object(Bucket=MINIO_BUCKET, Key=filename)
+        return StreamingResponse(obj['Body'], media_type='text/csv', headers={
+            'Content-Disposition': f'attachment; filename={filename}'
+        })
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
