@@ -218,9 +218,9 @@ class VideoAttentionPage:
                 files = {"file": (filename, f, "text/csv")}
                 response = requests.post(f"{backend_url}/save_attention_log", files=files)
             if response.status_code == 200:
-                self.status_text.value = f"Log de atención guardado en HDFS: {filename}"
+                self.status_text.value = f"Log de atención guardado en MinIO/S3: {filename}"
             else:
-                self.status_text.value = f"Error guardando en HDFS: {response.text}"
+                self.status_text.value = f"Error guardando en MinIO/S3: {response.text}"
         except Exception as e:
             self.status_text.value = f"Error conectando al backend: {e}"
         finally:

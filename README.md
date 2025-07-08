@@ -96,14 +96,14 @@ timestamp_s,in_attention
 
 Puedes abrir cada vista en una pantalla/monitor diferente para una experiencia completa.
 
-## Ejecución en Docker con Hadoop/HDFS
+## Ejecución en Docker con MinIO (S3)
 
 ### 1. Levantar todo con Docker Compose
 
 ```bash
 docker-compose up --build
 ```
-Esto levantará el backend (FastAPI) y el clúster Hadoop/HDFS. El backend guardará los logs de atención y reportes en HDFS automáticamente.
+Esto levantará el backend (FastAPI) y MinIO (S3). El backend guardará los logs de atención y reportes en MinIO automáticamente.
 
 ### 2. Ejecutar la GUI en tu máquina host
 
@@ -119,6 +119,7 @@ Asegúrate de que la variable de entorno `BACKEND_URL` apunte al backend (por de
 
 ### 3. ¿Dónde se guardan los logs?
 
-- Los logs de atención y reportes se guardan en HDFS, en la ruta `/reports/`.
-- Puedes acceder a ellos usando la interfaz web de Hadoop (por defecto en http://localhost:9870).
+- Los logs de atención y reportes se guardan en MinIO, en el bucket `reports`.
+- Puedes acceder a ellos usando la interfaz web de MinIO (por defecto en http://localhost:9001, usuario y contraseña: minioadmin).
+- También puedes usar cualquier cliente S3 compatible para descargar los archivos.
 

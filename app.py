@@ -2,13 +2,30 @@ import cv2
 import base64
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from drowsiness_processor.main import DrowsinessDetectionSystem
-from hdfs import InsecureClient
 import os
+import boto3
+from botocore.client import Config
 
-# Configuración de HDFS (puedes ajustar la URL y usuario según tu entorno)
-HDFS_URL = os.environ.get("HDFS_URL", "http://namenode:9870")
-HDFS_USER = os.environ.get("HDFS_USER", "hadoop")
-hdfs_client = InsecureClient(HDFS_URL, user=HDFS_USER)
+# Configuración de MinIO/S3
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "reports")
+
+s3_client = boto3.client(
+    's3',
+    endpoint_url=MINIO_ENDPOINT,
+    aws_access_key_id=MINIO_ACCESS_KEY,
+    aws_secret_access_key=MINIO_SECRET_KEY,
+    config=Config(signature_version='s3v4'),
+    region_name='us-east-1'
+)
+
+# Crear el bucket si no existe
+try:
+    s3_client.head_bucket(Bucket=MINIO_BUCKET)
+except Exception:
+    s3_client.create_bucket(Bucket=MINIO_BUCKET)
 
 
 app = FastAPI()
@@ -47,17 +64,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/save_attention_log")
 async def save_attention_log(file: UploadFile = File(...)):
-    """Recibe un archivo CSV y lo guarda en HDFS en /reports/"""
+    """Recibe un archivo CSV y lo guarda en MinIO/S3 en el bucket reports"""
     try:
-        # Nombre destino en HDFS
         filename = file.filename
-        hdfs_path = f"/reports/{filename}"
-        # Leer el archivo recibido
         contents = await file.read()
-        # Guardar en HDFS
-        with hdfs_client.write(hdfs_path, overwrite=True) as writer:
-            writer.write(contents)
-        return {"status": "ok", "hdfs_path": hdfs_path}
+        s3_client.put_object(Bucket=MINIO_BUCKET, Key=filename, Body=contents, ContentType='text/csv')
+        return {"status": "ok", "s3_path": f"s3://{MINIO_BUCKET}/{filename}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

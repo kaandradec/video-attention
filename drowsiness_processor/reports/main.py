@@ -2,11 +2,28 @@ import csv
 import os
 import json
 from datetime import datetime
-from hdfs import InsecureClient
+import boto3
+from botocore.client import Config
 
-HDFS_URL = os.environ.get("HDFS_URL", "http://namenode:9870")
-HDFS_USER = os.environ.get("HDFS_USER", "hadoop")
-hdfs_client = InsecureClient(HDFS_URL, user=HDFS_USER)
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "reports")
+
+s3_client = boto3.client(
+    's3',
+    endpoint_url=MINIO_ENDPOINT,
+    aws_access_key_id=MINIO_ACCESS_KEY,
+    aws_secret_access_key=MINIO_SECRET_KEY,
+    config=Config(signature_version='s3v4'),
+    region_name='us-east-1'
+)
+
+# Crear el bucket si no existe
+try:
+    s3_client.head_bucket(Bucket=MINIO_BUCKET)
+except Exception:
+    s3_client.create_bucket(Bucket=MINIO_BUCKET)
 
 
 class DrowsinessReports:
@@ -24,16 +41,12 @@ class DrowsinessReports:
             self.create_csv_file()
 
     def create_csv_file(self):
-        try:
-            # Intentar guardar en HDFS
-            with hdfs_client.write(f"/reports/{os.path.basename(self.file_name)}", overwrite=True, encoding="utf-8") as file:
-                writer = csv.DictWriter(file, fieldnames=self.fields)
-                writer.writeheader()
-        except Exception:
-            # Fallback local
-            with open(self.file_name, mode='w', newline='') as file:
-                writer = csv.DictWriter(file, fieldnames=self.fields)
-                writer.writeheader()
+        with open(self.file_name, mode='w', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.fields)
+            writer.writeheader()
+        # Subir a MinIO
+        with open(self.file_name, 'rb') as file:
+            s3_client.put_object(Bucket=MINIO_BUCKET, Key=os.path.basename(self.file_name), Body=file, ContentType='text/csv')
 
     def main(self, report_data: dict):
         if (report_data['eye_rub_first_hand']['eye_rub_report'] or
@@ -67,16 +80,12 @@ class DrowsinessReports:
                 'yawn_count': report_data.get('yawn', {}).get('yawn_count', 0),
                 'yawn_durations': report_data.get('yawn', {}).get('yawn_durations', [])
             }
-            try:
-                # Intentar guardar en HDFS
-                with hdfs_client.write(f"/reports/{os.path.basename(self.file_name)}", append=True, encoding="utf-8") as file:
-                    writer = csv.DictWriter(file, fieldnames=self.fields)
-                    writer.writerow(row)
-            except Exception:
-                # Fallback local
-                with open(self.file_name, mode='a', newline='') as file:
-                    writer = csv.DictWriter(file, fieldnames=self.fields)
-                    writer.writerow(row)
+            with open(self.file_name, mode='a', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=self.fields)
+                writer.writerow(row)
+            # Subir a MinIO
+            with open(self.file_name, 'rb') as file:
+                s3_client.put_object(Bucket=MINIO_BUCKET, Key=os.path.basename(self.file_name), Body=file, ContentType='text/csv')
 
     def generate_json_report(self, report_data: dict) -> str:
         report_json = {
