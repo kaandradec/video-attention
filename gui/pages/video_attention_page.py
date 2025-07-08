@@ -7,6 +7,8 @@ import datetime
 import csv
 from flet import Video, VideoMedia
 import time
+import requests
+import tempfile
 
 class VideoAttentionPage:
     def __init__(self, page):
@@ -201,14 +203,28 @@ class VideoAttentionPage:
             return
         video_name = os.path.splitext(os.path.basename(self.video_path))[0]
         now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"reports/attention_{video_name}_{now}.csv"
-        os.makedirs("reports", exist_ok=True)
-        with open(filename, "w", newline="", encoding="utf-8") as f:
+        filename = f"attention_{video_name}_{now}.csv"
+        # Guardar temporalmente el archivo CSV
+        with tempfile.NamedTemporaryFile(mode="w", newline="", encoding="utf-8", delete=False, suffix=".csv") as f:
             writer = csv.writer(f)
             writer.writerow(["timestamp_s", "in_attention"])
             for t, att in self.attention_log:
                 writer.writerow([f"{t:.2f}", int(att)])
-        self.status_text.value = f"Log de atención guardado en {filename}"
+            temp_path = f.name
+        # Enviar al backend
+        try:
+            backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+            with open(temp_path, "rb") as f:
+                files = {"file": (filename, f, "text/csv")}
+                response = requests.post(f"{backend_url}/save_attention_log", files=files)
+            if response.status_code == 200:
+                self.status_text.value = f"Log de atención guardado en HDFS: {filename}"
+            else:
+                self.status_text.value = f"Error guardando en HDFS: {response.text}"
+        except Exception as e:
+            self.status_text.value = f"Error conectando al backend: {e}"
+        finally:
+            os.remove(temp_path)
         self.page.update()
 
     def update_time_loop(self):

@@ -1,0 +1,56 @@
+version: '3.8'
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=test
+    ports:
+      - "9870:9870"  # HDFS web UI
+      - "8020:8020"  # HDFS namenode port (RPC)
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    depends_on:
+      - namenode
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+
+  backend:
+    build: .
+    container_name: video-attention-backend
+    environment:
+      - HDFS_URL=http://namenode:9870
+      - HDFS_USER=root
+    ports:
+      - "8000:8000"
+    depends_on:
+      - namenode
+
+# Esto solo trata de crear /reports en hdfs (no esta funcionando)
+  hdfs-init:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    depends_on:
+      - namenode
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "
+      for i in {1..30}; do
+        hdfs dfs -ls / && break;
+        echo 'Esperando a que el namenode esté listo...';
+        sleep 5;
+      done;
+      for i in {1..10}; do
+        hdfs dfs -mkdir -p /reports && hdfs dfs -chmod 777 /reports && break;
+        echo 'Reintentando crear /reports...';
+        sleep 3;
+      done
+      "
+volumes:
+  hadoop_namenode:
+  hadoop_datanode: 

@@ -96,3 +96,29 @@ timestamp_s,in_attention
 
 Puedes abrir cada vista en una pantalla/monitor diferente para una experiencia completa.
 
+## Ejecución en Docker con Hadoop/HDFS
+
+### 1. Levantar todo con Docker Compose
+
+```bash
+docker-compose up --build
+```
+Esto levantará el backend (FastAPI) y el clúster Hadoop/HDFS. El backend guardará los logs de atención y reportes en HDFS automáticamente.
+
+### 2. Ejecutar la GUI en tu máquina host
+
+En otra terminal, activa tu entorno y ejecuta la GUI como antes:
+
+```bash
+python main.py --mode=monitor
+# o
+python main.py --mode=video
+```
+
+Asegúrate de que la variable de entorno `BACKEND_URL` apunte al backend (por defecto: http://localhost:8000).
+
+### 3. ¿Dónde se guardan los logs?
+
+- Los logs de atención y reportes se guardan en HDFS, en la ruta `/reports/`.
+- Puedes acceder a ellos usando la interfaz web de Hadoop (por defecto en http://localhost:9870).
+

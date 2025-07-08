@@ -1,9 +1,11 @@
-FROM python:3.10-slim
+FROM python:3.12.1-slim
 
 # install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     libgl1 \
-    libglib2.0-0
+    libglib2.0-0 \
+    openjdk-17-jre-headless \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # path to work
 WORKDIR /app

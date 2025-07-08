@@ -2,6 +2,11 @@ import csv
 import os
 import json
 from datetime import datetime
+from hdfs import InsecureClient
+
+HDFS_URL = os.environ.get("HDFS_URL", "http://namenode:9870")
+HDFS_USER = os.environ.get("HDFS_USER", "hadoop")
+hdfs_client = InsecureClient(HDFS_URL, user=HDFS_USER)
 
 
 class DrowsinessReports:
@@ -19,9 +24,16 @@ class DrowsinessReports:
             self.create_csv_file()
 
     def create_csv_file(self):
-        with open(self.file_name, mode='w', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=self.fields)
-            writer.writeheader()
+        try:
+            # Intentar guardar en HDFS
+            with hdfs_client.write(f"/reports/{os.path.basename(self.file_name)}", overwrite=True, encoding="utf-8") as file:
+                writer = csv.DictWriter(file, fieldnames=self.fields)
+                writer.writeheader()
+        except Exception:
+            # Fallback local
+            with open(self.file_name, mode='w', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=self.fields)
+                writer.writeheader()
 
     def main(self, report_data: dict):
         if (report_data['eye_rub_first_hand']['eye_rub_report'] or
@@ -55,10 +67,16 @@ class DrowsinessReports:
                 'yawn_count': report_data.get('yawn', {}).get('yawn_count', 0),
                 'yawn_durations': report_data.get('yawn', {}).get('yawn_durations', [])
             }
-
-            with open(self.file_name, mode='a', newline='') as file:
-                writer = csv.DictWriter(file, fieldnames=self.fields)
-                writer.writerow(row)
+            try:
+                # Intentar guardar en HDFS
+                with hdfs_client.write(f"/reports/{os.path.basename(self.file_name)}", append=True, encoding="utf-8") as file:
+                    writer = csv.DictWriter(file, fieldnames=self.fields)
+                    writer.writerow(row)
+            except Exception:
+                # Fallback local
+                with open(self.file_name, mode='a', newline='') as file:
+                    writer = csv.DictWriter(file, fieldnames=self.fields)
+                    writer.writerow(row)
 
     def generate_json_report(self, report_data: dict) -> str:
         report_json = {
