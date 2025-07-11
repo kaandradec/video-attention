@@ -18,38 +18,43 @@ class GazeAttentionEstimator(DrowsinessProcessor):
         if self.start_time is None:
             self.start_time = time.time()
         current_time = time.time() - self.start_time
+
+        # Obtener variables necesarias
+        head_pitch = abs(face_points.get('head_pitch', 0.0))
+        head_yaw = abs(face_points.get('head_yaw', 0.0))
+        head_roll = abs(face_points.get('head_roll', 0.0))
         eyes_closed = face_points.get('eyes_closed', False)
         face_detected = face_points.get('face_detected', True)
-        head_yaw = abs(face_points.get('head_yaw', 0.0))
-        head_pitch = abs(face_points.get('head_pitch', 0.0))
-        head_roll = abs(face_points.get('head_roll', 0.0))
+
+        # Calcular duración de ojos cerrados
         if eyes_closed:
             if self.eyes_closed_start is None:
                 self.eyes_closed_start = time.time()
-            elif (time.time() - self.eyes_closed_start) >= self.eyes_closed_threshold:
-                self.eyes_closed_long = True
+            eyes_closed_duration = time.time() - self.eyes_closed_start
+            eyes_closed_long = eyes_closed_duration >= self.eyes_closed_threshold
         else:
             self.eyes_closed_start = None
-            self.eyes_closed_long = False
-        max_angle = 20.0
-        in_attention = (
-            head_yaw < max_angle and
-            head_pitch < max_angle and
-            head_roll < max_angle and
-            not self.eyes_closed_long and
-            face_detected
-        )
+            eyes_closed_duration = 0.0
+            eyes_closed_long = False
+
+        # Lógica de atención igual que en frontend
+        pitch_threshold = 12.0  # igual que en el frontend
+        pitch_valid = abs(head_pitch) < pitch_threshold
+        eyes_valid = not eyes_closed_long
+        face_valid = face_detected
+        in_attention = pitch_valid and eyes_valid and face_valid
+
         self.attention_log.append((current_time, in_attention))
         return {
             'timestamp': current_time,
             'in_attention': in_attention,
-            'head_yaw': head_yaw,
             'head_pitch': head_pitch,
+            'head_yaw': head_yaw,
             'head_roll': head_roll,
             'eyes_closed': eyes_closed,
             'face_detected': face_detected,
-            'eyes_closed_long': self.eyes_closed_long,
-            'eyes_closed_duration': (time.time() - self.eyes_closed_start) if self.eyes_closed_start else 0.0
+            'eyes_closed_long': eyes_closed_long,
+            'eyes_closed_duration': eyes_closed_duration
         }
 
     def export_attention_log(self):
