@@ -44,13 +44,11 @@ class DrowsinessDetectionSystem:
                 if hasattr(flicker_estimator, 'micro_sleep_detector'):
                     eyes_closed = flicker_estimator.micro_sleep_detector.closed_eyes(eyes_distances)
             face_detected = control_process
-            # Pasar head_yaw, head_pitch, head_roll a la lógica de atención
-            head_yaw = key_points.get('head_yaw', 0.0)
-            head_pitch = key_points.get('head_pitch', 0.0)
-            head_roll = key_points.get('head_roll', 0.0)
-            
+            # Usar solo los valores de rotación
+            head_yaw = points_processed.get('head_yaw', key_points.get('head_yaw', 0.0))
+            head_pitch = points_processed.get('head_pitch', key_points.get('head_pitch', 0.0))
+            head_roll = points_processed.get('head_roll', key_points.get('head_roll', 0.0))
             attention_input = dict(key_points)
-
             attention_input['eyes_closed'] = eyes_closed
             attention_input['face_detected'] = face_detected
             attention_input['head_yaw'] = head_yaw

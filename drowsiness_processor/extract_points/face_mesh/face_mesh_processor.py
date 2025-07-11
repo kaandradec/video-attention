@@ -2,7 +2,7 @@ import mediapipe as mp
 import numpy as np
 import cv2
 from typing import Tuple, Any, List, Dict
-
+import math
 
 class FaceMeshInference:
     def __init__(self, min_detection_confidence=0.6, min_tracking_confidence=0.6):
@@ -17,8 +17,7 @@ class FaceMeshInference:
     def process(self, image: np.ndarray) -> Tuple[bool, Any]:
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         face_mesh = self.face_mesh.process(rgb_image)
-        return bool(face_mesh.multi_face_landmarks), face_mesh
-
+        return bool(face_mesh and face_mesh.multi_face_landmarks), face_mesh
 
 class FaceMeshExtractor:
     def __init__(self):
@@ -29,9 +28,10 @@ class FaceMeshExtractor:
         }
 
     def extract_points(self, face_image: np.ndarray, face_mesh_info: Any) -> List[List[int]]:
+        """Extrae todos los landmarks de la malla facial en coordenadas de imagen [id, x, y, z]."""
         h, w, _ = face_image.shape
         mesh_points = [
-            [i, int(pt.x * w), int(pt.y * h)]
+            [i, int(pt.x * w), int(pt.y * h), pt.z]
             for face in face_mesh_info.multi_face_landmarks
             for i, pt in enumerate(face.landmark)
         ]
@@ -40,7 +40,7 @@ class FaceMeshExtractor:
     def extract_feature_points(self, face_points: List[List[int]], feature_indices: dict):
         for feature, indices in feature_indices.items():
             for sub_feature, sub_indices in indices.items():
-                self.points[feature][sub_feature] = [face_points[i][1:] for i in sub_indices]
+                self.points[feature][sub_feature] = [face_points[i][1:3] for i in sub_indices if i < len(face_points)]
 
     def get_eyes_points(self, face_points: List[List[int]]) -> Dict[str, List[List[int]]]:
         feature_indices = {
@@ -69,28 +69,35 @@ class FaceMeshExtractor:
         self.extract_feature_points(face_points, feature_indices)
         return self.points['head']
 
-
 class FaceMeshDrawer:
     def __init__(self, color: Tuple[int, int, int] = (255, 255, 0)):
         self.mp_draw = mp.solutions.drawing_utils
         self.config_draw = self.mp_draw.DrawingSpec(color=color, thickness=1, circle_radius=1)
 
     def draw(self, face_image: np.ndarray, face_mesh_info: Any):
-        for face_mesh in face_mesh_info.multi_face_landmarks:
-            self.mp_draw.draw_landmarks(face_image, face_mesh, mp.solutions.face_mesh.FACEMESH_TESSELATION,
-                                        self.config_draw, self.config_draw)
+        if face_mesh_info and face_mesh_info.multi_face_landmarks:
+            for face_mesh in face_mesh_info.multi_face_landmarks:
+                self.mp_draw.draw_landmarks(face_image, face_mesh, mp.solutions.face_mesh.FACEMESH_TESSELATION,
+                                            self.config_draw, self.config_draw)
 
     def draw_sketch(self, face_image: np.ndarray, face_mesh_info: Any):
         h, w, _ = face_image.shape
         black_image = np.zeros((h, w, 3), dtype=np.uint8)
-        for face_mesh in face_mesh_info.multi_face_landmarks:
-            for pt in face_mesh.landmark:
-                x = int(pt.x * w)
-                y = int(pt.y * h)
-                z = int(pt.z * 50)
-                cv2.circle(black_image, (x, y), 1, (255 - z, 255 - z, 0 - z), -1)
+        if face_mesh_info and face_mesh_info.multi_face_landmarks:
+            for face_mesh in face_mesh_info.multi_face_landmarks:
+                for pt in face_mesh.landmark:
+                    x = int(pt.x * w)
+                    y = int(pt.y * h)
+                    z_scaled = int(pt.z * w/4)
+                    color_intensity = max(0, min(255, 128 - z_scaled))
+                    cv2.circle(black_image, (x, y), 1, (color_intensity, color_intensity, 0), -1)
         return black_image
 
+    def draw_pose_axes(self, image, nose_tip_2d, yaw_end_2d, pitch_end_2d, roll_end_2d):
+        """Dibuja los ejes de pose (Yaw, Pitch, Roll) proyectados en la imagen."""
+        cv2.line(image, nose_tip_2d, yaw_end_2d, (0, 0, 255), 2)  # Eje Z (azul)
+        cv2.line(image, nose_tip_2d, pitch_end_2d, (0, 255, 0), 2)  # Eje Y (verde)
+        cv2.line(image, nose_tip_2d, roll_end_2d, (255, 0, 0), 2)  # Eje X (rojo)
 
 class FaceMeshProcessor:
     def __init__(self):
@@ -98,112 +105,121 @@ class FaceMeshProcessor:
         self.extractor = FaceMeshExtractor()
         self.drawer = FaceMeshDrawer()
 
+        # Puntos 3D del modelo de cabeza genérica (en milímetros)
+        # Estos puntos corresponden a los landmarks específicos de MediaPipe
+        self.model_points = np.array([
+            (0.0, 0.0, 0.0),             # 1. Punta de la nariz
+            (0.0, -330.0, -65.0),        # 152. Mentón
+            (-225.0, 170.0, -135.0),     # 33. Esquina interna ojo izq
+            (225.0, 170.0, -135.0),      # 263. Esquina interna ojo der
+            (-150.0, -150.0, -125.0),    # 61. Comisura izq boca
+            (150.0, -150.0, -125.0)      # 291. Comisura der boca
+        ], dtype=np.float32)
+
+        # Índices de MediaPipe correspondientes a los model_points definidos
+        self.pnp_landmark_indices = [1, 152, 33, 263, 61, 291]
+
+        # Coeficientes de distorsión (asumimos cero si no se calibra la cámara)
+        self.dist_coeffs = np.zeros((4, 1))
+
     def process(self, face_image: np.ndarray, draw: bool = True) -> Tuple[dict, bool, np.ndarray]:
         h, w, _ = face_image.shape
         sketch = np.zeros((h, w, 3), dtype=np.uint8)
+        points = {'face_detected': False, 'head_yaw': 0.0, 'head_pitch': 0.0, 'head_roll': 0.0}
+
         success, face_mesh_info = self.inference.process(face_image)
+
         if not success:
-            points = {'face_detected': False}
-            return points, success, sketch
-
-        face_points = self.extractor.extract_points(face_image, face_mesh_info)
-        
-        # Verificar si hay suficientes landmarks para considerar un rostro válido
-        if len(face_points) < 473:  # Necesitamos al menos 473 landmarks para un rostro completo
-            points = {'face_detected': False}
             return points, False, sketch
-        
-        # Verificar landmarks específicos que deben estar presentes en un rostro real
-        # Landmarks clave: nariz (1), ojos (33, 263), boca (61, 291), mentón (152)
-        required_landmarks = [1, 33, 263, 61, 291, 152]
-        for landmark_id in required_landmarks:
-            if landmark_id >= len(face_points):
-                points = {'face_detected': False}
-                return points, False, sketch
-        
-        # Verificar que los landmarks estén en posiciones razonables (dentro de la imagen)
-        for landmark_id in required_landmarks:
-            x, y = face_points[landmark_id][1], face_points[landmark_id][2]
-            if x < 0 or x >= w or y < 0 or y >= h:
-                points = {'face_detected': False}
-                return points, False, sketch
-        
-        # Verificar que la distancia entre ojos sea razonable (indicador de rostro real)
-        left_eye = face_points[33][1:]  # Ojo izquierdo
-        right_eye = face_points[263][1:]  # Ojo derecho
-        eye_distance = np.sqrt((right_eye[0] - left_eye[0])**2 + (right_eye[1] - left_eye[1])**2)
-        
-        # La distancia entre ojos debe ser al menos 50 píxeles para un rostro real
-        if eye_distance < 50:
-            points = {'face_detected': False}
+
+        all_face_points = self.extractor.extract_points(face_image, face_mesh_info)
+
+        # Verificar si tenemos suficientes landmarks para PnP
+        if len(all_face_points) < max(self.pnp_landmark_indices) + 1:
             return points, False, sketch
-            
-        points = {
-            'eyes': self.extractor.get_eyes_points(face_points),
-            'mouth': self.extractor.get_mouth_points(face_points),
-            'head': self.extractor.get_head_points(face_points),
-        }
 
-        # --- NUEVO: Calcular gaze_x (posición horizontal) y gaze_y (vertical) de la pupila respecto al rostro ---
-        # Usar landmarks de los ojos para estimar la dirección de la mirada
-        # Ejemplo simple: usar el landmark 468 (ojo derecho) y 473 (ojo izquierdo) para estimar el centro de la mirada
-        # y normalizar respecto al ancho y alto de la cara
-        if len(face_points) > 473:
-            left_eye_x = face_points[468][1]
-            right_eye_x = face_points[473][1]
-            left_eye_y = face_points[468][2]
-            right_eye_y = face_points[473][2]
-            # Centro de la mirada
-            gaze_x_pixel = (left_eye_x + right_eye_x) / 2
-            gaze_y_pixel = (left_eye_y + right_eye_y) / 2
-            gaze_x_norm = gaze_x_pixel / w  # Normalizado entre 0 y 1
-            gaze_y_norm = gaze_y_pixel / h  # Normalizado entre 0 y 1
-            points['gaze_x'] = gaze_x_norm
-            points['gaze_y'] = gaze_y_norm
+        # Preparar puntos 2D para PnP
+        image_points = np.array([
+            all_face_points[idx][1:3] for idx in self.pnp_landmark_indices
+        ], dtype=np.float32)
+
+        # Verificar si algún punto PnP está fuera de la imagen
+        if np.any(image_points < 0) or np.any(image_points[:, 0] >= w) or np.any(image_points[:, 1] >= h):
+            return points, False, sketch
+
+        # Calcular la distancia entre ojos como indicador de rostro válido
+        left_eye = np.array(all_face_points[33][1:3])
+        right_eye = np.array(all_face_points[263][1:3])
+        eye_distance = np.linalg.norm(left_eye - right_eye)
+
+        if eye_distance < 20:
+            return points, False, sketch
+
+        # Estimar Matriz de Cámara
+        focal_length = w
+        center = (w / 2, h / 2)
+        camera_matrix = np.array([
+            [focal_length, 0, center[0]],
+            [0, focal_length, center[1]],
+            [0, 0, 1]
+        ], dtype=np.float32)
+
+        # Resolver PnP
+        success_pnp, rvec, tvec = cv2.solvePnP(self.model_points, image_points, camera_matrix, self.dist_coeffs, flags=cv2.SOLVEPNP_DLS)
+
+        if success_pnp:
+            # Convertir rvec a ángulos de Euler (Yaw, Pitch, Roll)
+            R, _ = cv2.Rodrigues(rvec)
+
+            try:
+                # Extraer ángulos de Euler de la matriz de rotación R
+                sin_pitch = -R[2, 0]
+                cos_pitch = math.sqrt(R[2, 1]**2 + R[2, 2]**2)
+
+                if cos_pitch < 1e-6:  # Manejar gimbal lock
+                    pitch = math.atan2(sin_pitch, 0)
+                    if sin_pitch > 0:  # pitch = +90
+                        yaw = math.atan2(R[0, 1], R[0, 2])
+                        roll = 0
+                    else:  # pitch = -90
+                        yaw = math.atan2(-R[0, 1], -R[0, 2])
+                        roll = 0
+                else:
+                    pitch = math.atan2(sin_pitch, cos_pitch)
+                    yaw = math.atan2(R[1, 0], R[0, 0])
+                    roll = math.atan2(R[2, 1], R[2, 2])
+
+                # Convertir a grados
+                yaw_deg = math.degrees(yaw)
+                pitch_deg = math.degrees(pitch)
+                roll_deg = math.degrees(roll)
+
+                # Asignar los valores de rotación a gaze_x y gaze_y
+                points['head_yaw'] = float(yaw_deg)
+                points['head_pitch'] = float(pitch_deg)
+                points['head_roll'] = float(roll_deg)
+                points['face_detected'] = True
+                print(f"PnP ROTATION: yaw={yaw_deg:.2f}, pitch={pitch_deg:.2f}, roll={roll_deg:.2f}")
+
+            except Exception as e:
+                print(f"Error calculando ángulos de Euler: {e}")
+                points['face_detected'] = True
+                points['head_yaw'] = 0.0
+                points['head_pitch'] = 0.0
+                points['head_roll'] = 0.0
         else:
-            points['gaze_x'] = 0.5  # Valor por defecto (centro)
-            points['gaze_y'] = 0.5  # Valor por defecto (centro)
+            points['face_detected'] = False
 
-        # --- NUEVO: Calcular ángulos de rotación de la cabeza (yaw, pitch, roll) ---
-        # Usar landmarks de la mesh facial para estimar orientación de la cabeza
-        # Yaw: rotación izquierda/derecha
-        # Pitch: arriba/abajo
-        # Roll: inclinación lateral
-        if len(face_points) > 473:
-            # Nariz (landmark 1), mentón (152), ojo izquierdo (33), ojo derecho (263),
-            # comisura izq boca (61), comisura der boca (291)
-            nose = np.array(face_points[1][1:])
-            chin = np.array(face_points[152][1:])
-            left_eye = np.array(face_points[33][1:])
-            right_eye = np.array(face_points[263][1:])
-            left_mouth = np.array(face_points[61][1:])
-            right_mouth = np.array(face_points[291][1:])
-            # Vectores
-            eye_line = right_eye - left_eye
-            mouth_line = right_mouth - left_mouth
-            nose_chin = chin - nose
-            # Roll: ángulo entre la línea de los ojos y el eje horizontal
-            roll = np.degrees(np.arctan2(eye_line[1], eye_line[0]))
-            # Yaw: ángulo entre la línea de los ojos y la línea de la boca (proyección horizontal)
-            # Si la nariz se desplaza lateralmente respecto al centro de la línea de los ojos
-            eye_center = (left_eye + right_eye) / 2
-            mouth_center = (left_mouth + right_mouth) / 2
-            face_center = (eye_center + mouth_center) / 2
-            yaw = np.degrees(np.arctan2(nose[0] - face_center[0], nose[1] - face_center[1]))
-            # Pitch: ángulo entre la línea nariz-mentón y el eje vertical
-            pitch = np.degrees(np.arctan2(nose_chin[1], nose_chin[0]))
-            points['head_yaw'] = float(yaw)
-            points['head_pitch'] = float(pitch)
-            points['head_roll'] = float(roll)
-        else:
-            points['head_yaw'] = 0.0
-            points['head_pitch'] = 0.0
-            points['head_roll'] = 0.0
-
+        # Agregar los puntos de características necesarios para el resto del pipeline
+        if points['face_detected']:
+            # Extraer puntos de características usando el extractor
+            face_points = self.extractor.extract_points(face_image, face_mesh_info)
+            points['eyes'] = self.extractor.get_eyes_points(face_points)
+            points['mouth'] = self.extractor.get_mouth_points(face_points)
+            points['head'] = self.extractor.get_head_points(face_points)
+        
+        # Dibujar malla facial
         if draw:
             sketch = self.drawer.draw_sketch(face_image, face_mesh_info)
-            points['face_detected'] = True
-            return points, True, sketch
 
-        points['face_detected'] = True
-        return points, True, sketch
+        return points, points['face_detected'], sketch

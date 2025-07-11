@@ -4,18 +4,17 @@ from drowsiness_processor.drowsiness_features.processor import DrowsinessProcess
 
 class GazeAttentionEstimator(DrowsinessProcessor):
     def __init__(self, screen_center_x=0.5, screen_center_y=0.5, tolerance_x=0.2, tolerance_y=0.2, eyes_closed_threshold=1.5):
-        self.screen_center_x = screen_center_x  # Normalizado (0 a 1)
-        self.screen_center_y = screen_center_y  # Normalizado (0 a 1)
-        self.tolerance_x = tolerance_x  # Cuánto puede desviarse la mirada del centro (horizontal)
-        self.tolerance_y = tolerance_y  # Cuánto puede desviarse la mirada del centro (vertical)
-        self.attention_log = []  # Guarda (timestamp, attention: bool)
+        self.screen_center_x = screen_center_x
+        self.screen_center_y = screen_center_y
+        self.tolerance_x = tolerance_x
+        self.tolerance_y = tolerance_y
+        self.attention_log = []
         self.start_time = None
-        self.eyes_closed_threshold = eyes_closed_threshold  # segundos
+        self.eyes_closed_threshold = eyes_closed_threshold
         self.eyes_closed_start = None
         self.eyes_closed_long = False
 
     def process(self, face_points: dict) -> Dict[str, Any]:
-        # Suponemos que face_points tiene las claves 'head_yaw', 'head_pitch', 'head_roll', 'eyes_closed', 'face_detected'
         if self.start_time is None:
             self.start_time = time.time()
         current_time = time.time() - self.start_time
@@ -24,7 +23,6 @@ class GazeAttentionEstimator(DrowsinessProcessor):
         head_yaw = abs(face_points.get('head_yaw', 0.0))
         head_pitch = abs(face_points.get('head_pitch', 0.0))
         head_roll = abs(face_points.get('head_roll', 0.0))
-        # --- NUEVO: Solo marcar no atención si los ojos están cerrados más de threshold ---
         if eyes_closed:
             if self.eyes_closed_start is None:
                 self.eyes_closed_start = time.time()
@@ -33,8 +31,7 @@ class GazeAttentionEstimator(DrowsinessProcessor):
         else:
             self.eyes_closed_start = None
             self.eyes_closed_long = False
-        # Solo atención si los ángulos están dentro de un rango aceptable
-        max_angle = 20.0  # grados
+        max_angle = 20.0
         in_attention = (
             head_yaw < max_angle and
             head_pitch < max_angle and

@@ -36,4 +36,19 @@ class PointsProcessing:
         self.processed_points['head'] = self.face_processors['head'].process(points.get('head', {}))
         self.processed_points['mouth'] = self.face_processors['mouth'].process(points.get('mouth', {}))
 
+        # --- PRESERVAR VALORES DE ROTACIÓN 3D CALCULADOS EN FACE MESH PROCESSOR ---
+        # Estos valores se calculan en FaceMeshProcessor usando PnP y deben preservarse
+        if 'gaze_x' in points:
+            self.processed_points['gaze_x'] = points['gaze_x']
+        if 'gaze_y' in points:
+            self.processed_points['gaze_y'] = points['gaze_y']
+        if 'head_yaw' in points:
+            self.processed_points['head_yaw'] = points['head_yaw']
+        if 'head_pitch' in points:
+            self.processed_points['head_pitch'] = points['head_pitch']
+        if 'head_roll' in points:
+            self.processed_points['head_roll'] = points['head_roll']
+        if 'face_detected' in points:
+            self.processed_points['face_detected'] = points['face_detected']
+
         return self.processed_points

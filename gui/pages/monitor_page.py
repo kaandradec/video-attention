@@ -54,7 +54,7 @@ class Monitor:
 
     def main(self):
         self.attention_text = Text("Atención: --", size=32, color="#FFFFFF", weight="bold")
-        self.gaze_status_text = Text("", size=18, color="#FFFFFF")
+        self.head_rotation_status_text = Text("", size=18, color="#FFFFFF")
         self.eyes_status_text = Text("", size=18, color="#FFFFFF")
         self.face_status_text = Text("", size=18, color="#FFFFFF")
         self.original_image_control = Image(
@@ -80,7 +80,7 @@ class Monitor:
         # Debug simple
         self.debug_text = Text("Debug: No hay datos", size=14, color="#FFFF00")
         self.debug_timestamp = Text("Timestamp: --", size=14, color="#FFFF00")
-        self.debug_gaze = Text("Gaze: --", size=14, color="#FFFF00")
+        self.debug_gaze = Text("Rotación 3D: --", size=14, color="#FFFF00")
         self.debug_eyes = Text("Eyes: --", size=14, color="#FFFF00")
         self.debug_face = Text("Face: --", size=14, color="#FFFF00")
         self.debug_eyes_duration = Text("Eyes Duration: --", size=14, color="#FFFF00")
@@ -112,7 +112,7 @@ class Monitor:
                     ], alignment='center', vertical_alignment='center', spacing=40, expand=True),
                     self.toggle_button,
                     self.attention_text,
-                    self.gaze_status_text,
+                    self.head_rotation_status_text,
                     self.eyes_status_text,
                     self.face_status_text,
                     self.debug_text,
@@ -167,7 +167,7 @@ class Monitor:
         self.attention_text.color = "#FFFFFF"
         self.debug_text.value = "Debug: No hay datos"
         self.debug_timestamp.value = "Timestamp: --"
-        self.debug_gaze.value = "Gaze: --"
+        self.debug_gaze.value = "Rotación 3D: --"
         self.debug_eyes.value = "Eyes: --"
         self.debug_face.value = "Face: --"
         self.debug_eyes_duration.value = "Eyes Duration: --"
@@ -259,33 +259,30 @@ class Monitor:
                     self.last_attention = attention
                     # --- NUEVO: Mostrar detalles de atención ---
                     # Por compatibilidad, si el backend no envía detalles, los valores por defecto serán None
-                    gaze_x = attention.get('gaze_x', None)
-                    gaze_y = attention.get('gaze_y', None)
+                    head_yaw = attention.get('head_yaw', None)  # Rotación horizontal 3D (grados)
+                    head_pitch = attention.get('head_pitch', None)  # Rotación vertical 3D (grados)
                     eyes_closed = attention.get('eyes_closed', None)
                     face_detected = attention.get('face_detected', None)
-                    # Parámetros de tolerancia (deben coincidir con backend)
-                    tolerance_x = 0.2
-                    tolerance_y = 0.2
-                    center_x = 0.5
-                    center_y = 0.5
-                    # Estado de mirada
+                    # Parámetros de tolerancia para rotación (grados)
+                    tolerance_rotation = 20.0  # grados
+                    # Estado de rotación de la cabeza
                     gaze_msg = ""
-                    if gaze_x is not None and gaze_y is not None:
-                        if abs(gaze_x - center_x) > tolerance_x:
-                            if gaze_x < center_x:
-                                gaze_msg = "Mirada desviada a la IZQUIERDA"
+                    if head_yaw is not None and head_pitch is not None:
+                        if abs(head_yaw) > tolerance_rotation:
+                            if head_yaw < 0:
+                                gaze_msg = f"Cabeza rotada IZQUIERDA ({head_yaw:.1f}°)"
                             else:
-                                gaze_msg = "Mirada desviada a la DERECHA"
-                        elif abs(gaze_y - center_y) > tolerance_y:
-                            if gaze_y < center_y:
-                                gaze_msg = "Mirada desviada ARRIBA"
+                                gaze_msg = f"Cabeza rotada DERECHA ({head_yaw:.1f}°)"
+                        elif abs(head_pitch) > tolerance_rotation:
+                            if head_pitch < 0:
+                                gaze_msg = f"Cabeza rotada ARRIBA ({head_pitch:.1f}°)"
                             else:
-                                gaze_msg = "Mirada desviada ABAJO"
+                                gaze_msg = f"Cabeza rotada ABAJO ({head_pitch:.1f}°)"
                         else:
-                            gaze_msg = "Mirada centrada"
+                            gaze_msg = f"Cabeza centrada (Yaw: {head_yaw:.1f}°, Pitch: {head_pitch:.1f}°)"
                     else:
-                        gaze_msg = "No se puede determinar la dirección de la mirada"
-                    self.gaze_status_text.value = gaze_msg
+                        gaze_msg = "No se puede determinar la rotación de la cabeza"
+                    self.head_rotation_status_text.value = gaze_msg
                     # Estado de ojos
                     if eyes_closed is not None:
                         if eyes_closed:
@@ -313,13 +310,13 @@ class Monitor:
                     else:
                         self.debug_timestamp.value = f"Timestamp: {timestamp}"
                     
-                    # Gaze con 2 decimales
-                    gaze_x = attention.get('gaze_x', 'N/A')
-                    gaze_y = attention.get('gaze_y', 'N/A')
-                    if isinstance(gaze_x, (int, float)) and isinstance(gaze_y, (int, float)):
-                        self.debug_gaze.value = f"Gaze: ({gaze_x:.2f}, {gaze_y:.2f})"
+                    # Gaze con 2 decimales (ahora son rotaciones 3D en grados)
+                    head_yaw = attention.get('head_yaw', 'N/A')
+                    head_pitch = attention.get('head_pitch', 'N/A')
+                    if isinstance(head_yaw, (int, float)) and isinstance(head_pitch, (int, float)):
+                        self.debug_gaze.value = f"Rotación 3D: Yaw={head_yaw:.1f}°, Pitch={head_pitch:.1f}°"
                     else:
-                        self.debug_gaze.value = f"Gaze: ({gaze_x}, {gaze_y})"
+                        self.debug_gaze.value = f"Rotación 3D: ({head_yaw}, {head_pitch})"
                     
                     # Eyes
                     eyes_closed = attention.get('eyes_closed', 'N/A')
@@ -348,8 +345,8 @@ class Monitor:
                     
                     # --- CALCULAR ATENCIÓN GENERAL EN FRONTEND ---
                     # Obtener todas las variables del JSON
-                    head_yaw = abs(attention.get('head_yaw', 0.0))
-                    head_pitch = abs(attention.get('head_pitch', 0.0))
+                    head_yaw = abs(attention.get('head_yaw', 0.0))  # Rotación horizontal
+                    head_pitch = abs(attention.get('head_pitch', 0.0))  # Rotación vertical
                     head_roll = abs(attention.get('head_roll', 0.0))
                     
                     # Criterios para determinar atención
