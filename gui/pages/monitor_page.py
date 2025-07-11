@@ -50,7 +50,7 @@ class Monitor:
         
         # Variables para cálculo de umbral de ojos cerrados en frontend
         self.eyes_closed_start = None
-        self.eyes_closed_threshold = 1.5  # segundos
+        self.eyes_closed_threshold = 1.2  # segundos
 
     def main(self):
         self.attention_text = Text("Atención: --", size=32, color="#FFFFFF", weight="bold")
@@ -112,14 +112,14 @@ class Monitor:
                     ], alignment='center', vertical_alignment='center', spacing=40, expand=True),
                     self.toggle_button,
                     self.attention_text,
-                    self.head_rotation_status_text,
-                    self.eyes_status_text,
-                    self.face_status_text,
+                    # self.head_rotation_status_text,  # Oculto visualmente
+                    # self.eyes_status_text,           # Oculto visualmente
+                    # self.face_status_text,           # Oculto visualmente
                     self.debug_text,
                     self.debug_timestamp,
-                    self.debug_gaze,
+                    # self.debug_gaze,  # Oculto visualmente
                     self.debug_eyes,
-                    self.debug_face,
+                    # self.debug_face,  # Oculto visualmente
                     self.debug_eyes_duration,
                 ], alignment='center', horizontal_alignment='center', spacing=10, expand=True)
             ),
@@ -349,22 +349,39 @@ class Monitor:
                     head_pitch = abs(attention.get('head_pitch', 0.0))  # Rotación vertical
                     head_roll = abs(attention.get('head_roll', 0.0))
                     
-                    # Criterios para determinar atención
-                    max_angle = 20.0  # grados (mismo que backend)
-                    face_ok = face_detected == True
-                    head_ok = head_yaw < max_angle and head_pitch < max_angle and head_roll < max_angle
-                    eyes_ok = not eyes_closed_long  # Usar nuestro cálculo del umbral
+                    # --- NUEVA LÓGICA DE ATENCIÓN SOLO CON PITCH ---
+                    pitch_threshold = 12.0  # grados (rotación vertical - arriba/abajo)
                     
-                    # Atención general
-                    in_attention = face_ok and head_ok and eyes_ok
-                    
-                    # Actualizar texto de atención
-                    if in_attention:
-                        self.attention_text.value = f"Atención: SÍ ({attention.get('timestamp', 0):.1f}s)"
-                        self.attention_text.color = "#00FF00"
+                    # Verificar si el valor de pitch está disponible
+                    if head_pitch is not None:
+                        # Criterio de atención: solo depende de pitch
+                        pitch_valid = head_pitch > pitch_threshold  # Pitch debe ser mayor a 15 grados
+                        eyes_valid = not eyes_closed_long if eyes_closed_long is not None else True
+                        face_valid = face_detected if face_detected is not None else False
+                        
+                        # Atención general basada solo en pitch, ojos y rostro
+                        in_attention_frontend = pitch_valid and eyes_valid and face_valid
+                        
+                        # Mostrar detalles de la lógica de atención
+                        attention_details = []
+                        if not pitch_valid:
+                            attention_details.append(f"Rotación vertical insuficiente ({head_pitch:.1f}° <= {pitch_threshold}°)")
+                        if not eyes_valid:
+                            attention_details.append("Ojos cerrados largo tiempo")
+                        if not face_valid:
+                            attention_details.append("No hay persona detectada")
+                        
+                        # Actualizar texto de atención con detalles
+                        if in_attention_frontend:
+                            self.attention_text.value = f"Atención: SÍ ({attention.get('timestamp', 0):.1f}s)"
+                            self.attention_text.color = "#00FF00"
+                        else:
+                            details_text = " | ".join(attention_details) if attention_details else "Criterios no cumplidos"
+                            self.attention_text.value = f"Atención: NO ({attention.get('timestamp', 0):.1f}s) - {details_text}"
+                            self.attention_text.color = "#FF0000"
                     else:
-                        self.attention_text.value = f"Atención: NO ({attention.get('timestamp', 0):.1f}s)"
-                        self.attention_text.color = "#FF0000"
+                        self.attention_text.value = f"Atención: -- (sin datos de pitch)"
+                        self.attention_text.color = "#FFFFFF"
                 # update image in Flet
                 self.original_image_control.src_base64 = self.cv2_to_base64(original_image)
                 self.sketch_image_control.src_base64 = self.cv2_to_base64(sketch_image)
