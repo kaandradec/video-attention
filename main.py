@@ -2,7 +2,7 @@ import sys
 from flet import *
 from gui.pages.start_page import Start
 from gui.pages.selection_interface_page import SelectionInterface
-from gui.pages.drowsiness_page import Drowsiness
+from gui.pages.monitor_page import Monitor
 from gui.pages.video_attention_page import VideoAttentionPage
 import threading
 import asyncio
@@ -54,7 +54,7 @@ class MainApp:
         )
 
         if self.mode == "monitor":
-            self.drowsiness_page = Drowsiness(page)
+            self.drowsiness_page = Monitor(page)
             self.page.views.append(View(route="/monitor", controls=[self.drowsiness_page.main()]))
             self.page.update()
             # Iniciar servidor websocket para sincronización en un hilo aparte

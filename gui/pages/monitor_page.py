@@ -21,7 +21,7 @@ from flet import DataTable, DataColumn, DataRow, DataCell, IconButton, icons
 from gui.resources.resources_path import (ImagePaths, FontsPath)
 
 
-class Drowsiness:
+class Monitor:
     def __init__(self, page):
         self.page = page
 
@@ -39,9 +39,24 @@ class Drowsiness:
         self.download_file_picker = FilePicker(on_result=self.on_download_location_selected)
         self.file_to_download = None
         self.file_to_download_backend_name = None
+        
+        # Debug simple
+        self.debug_text = None
+        self.debug_timestamp = None
+        self.debug_gaze = None
+        self.debug_eyes = None
+        self.debug_face = None
+        self.debug_eyes_duration = None
+        
+        # Variables para cálculo de umbral de ojos cerrados en frontend
+        self.eyes_closed_start = None
+        self.eyes_closed_threshold = 1.5  # segundos
 
     def main(self):
         self.attention_text = Text("Atención: --", size=32, color="#FFFFFF", weight="bold")
+        self.gaze_status_text = Text("", size=18, color="#FFFFFF")
+        self.eyes_status_text = Text("", size=18, color="#FFFFFF")
+        self.face_status_text = Text("", size=18, color="#FFFFFF")
         self.original_image_control = Image(
             fit=ImageFit.CONTAIN,
             src_base64=self.get_placeholder_image(),
@@ -61,6 +76,15 @@ class Drowsiness:
             height=50,
             style=ButtonStyle(),
         )
+        
+        # Debug simple
+        self.debug_text = Text("Debug: No hay datos", size=14, color="#FFFF00")
+        self.debug_timestamp = Text("Timestamp: --", size=14, color="#FFFF00")
+        self.debug_gaze = Text("Gaze: --", size=14, color="#FFFF00")
+        self.debug_eyes = Text("Eyes: --", size=14, color="#FFFF00")
+        self.debug_face = Text("Face: --", size=14, color="#FFFF00")
+        self.debug_eyes_duration = Text("Eyes Duration: --", size=14, color="#FFFF00")
+        
         # --- Mejora visual historial ---
         self.status_text = Text("", size=18, color="#FFFFFF")
         self.plot_image = None
@@ -87,8 +111,17 @@ class Drowsiness:
                         self.sketch_image_control
                     ], alignment='center', vertical_alignment='center', spacing=40, expand=True),
                     self.toggle_button,
-                    self.attention_text
-                ], alignment='center', horizontal_alignment='center', spacing=30, expand=True)
+                    self.attention_text,
+                    self.gaze_status_text,
+                    self.eyes_status_text,
+                    self.face_status_text,
+                    self.debug_text,
+                    self.debug_timestamp,
+                    self.debug_gaze,
+                    self.debug_eyes,
+                    self.debug_face,
+                    self.debug_eyes_duration,
+                ], alignment='center', horizontal_alignment='center', spacing=10, expand=True)
             ),
             Tab(
                 text="Historial de Reportes",
@@ -132,6 +165,16 @@ class Drowsiness:
         self.sketch_image_control.src_base64 = self.get_placeholder_image()
         self.attention_text.value = "Atención: --"
         self.attention_text.color = "#FFFFFF"
+        self.debug_text.value = "Debug: No hay datos"
+        self.debug_timestamp.value = "Timestamp: --"
+        self.debug_gaze.value = "Gaze: --"
+        self.debug_eyes.value = "Eyes: --"
+        self.debug_face.value = "Face: --"
+        self.debug_eyes_duration.value = "Eyes Duration: --"
+        
+        # Resetear variables de cálculo de ojos cerrados
+        self.eyes_closed_start = None
+        
         self.page.update()
 
     def run_detection(self):
@@ -214,17 +257,120 @@ class Drowsiness:
                 attention = response_data.get("attention")
                 if attention is not None:
                     self.last_attention = attention
-                    if attention.get("in_attention"):
-                        self.attention_text.value = f"Atención: SÍ ({attention.get('timestamp'):.1f}s)"
+                    # --- NUEVO: Mostrar detalles de atención ---
+                    # Por compatibilidad, si el backend no envía detalles, los valores por defecto serán None
+                    gaze_x = attention.get('gaze_x', None)
+                    gaze_y = attention.get('gaze_y', None)
+                    eyes_closed = attention.get('eyes_closed', None)
+                    face_detected = attention.get('face_detected', None)
+                    # Parámetros de tolerancia (deben coincidir con backend)
+                    tolerance_x = 0.2
+                    tolerance_y = 0.2
+                    center_x = 0.5
+                    center_y = 0.5
+                    # Estado de mirada
+                    gaze_msg = ""
+                    if gaze_x is not None and gaze_y is not None:
+                        if abs(gaze_x - center_x) > tolerance_x:
+                            if gaze_x < center_x:
+                                gaze_msg = "Mirada desviada a la IZQUIERDA"
+                            else:
+                                gaze_msg = "Mirada desviada a la DERECHA"
+                        elif abs(gaze_y - center_y) > tolerance_y:
+                            if gaze_y < center_y:
+                                gaze_msg = "Mirada desviada ARRIBA"
+                            else:
+                                gaze_msg = "Mirada desviada ABAJO"
+                        else:
+                            gaze_msg = "Mirada centrada"
+                    else:
+                        gaze_msg = "No se puede determinar la dirección de la mirada"
+                    self.gaze_status_text.value = gaze_msg
+                    # Estado de ojos
+                    if eyes_closed is not None:
+                        if eyes_closed:
+                            self.eyes_status_text.value = "Ojos cerrados (no atención)"
+                        else:
+                            self.eyes_status_text.value = "Ojos abiertos"
+                    else:
+                        self.eyes_status_text.value = "No se puede determinar el estado de los ojos"
+                    # Estado de rostro
+                    if face_detected is not None:
+                        if not face_detected:
+                            self.face_status_text.value = "No se detecta persona en cámara (no atención)"
+                        else:
+                            self.face_status_text.value = "Persona detectada"
+                    else:
+                        self.face_status_text.value = "No se puede determinar si hay persona"
+                    
+                    # Debug simple
+                    self.debug_text.value = "Debug: JSON recibido"
+                    
+                    # Timestamp con 2 decimales
+                    timestamp = attention.get('timestamp', 'N/A')
+                    if isinstance(timestamp, (int, float)):
+                        self.debug_timestamp.value = f"Timestamp: {timestamp:.2f}"
+                    else:
+                        self.debug_timestamp.value = f"Timestamp: {timestamp}"
+                    
+                    # Gaze con 2 decimales
+                    gaze_x = attention.get('gaze_x', 'N/A')
+                    gaze_y = attention.get('gaze_y', 'N/A')
+                    if isinstance(gaze_x, (int, float)) and isinstance(gaze_y, (int, float)):
+                        self.debug_gaze.value = f"Gaze: ({gaze_x:.2f}, {gaze_y:.2f})"
+                    else:
+                        self.debug_gaze.value = f"Gaze: ({gaze_x}, {gaze_y})"
+                    
+                    # Eyes
+                    eyes_closed = attention.get('eyes_closed', 'N/A')
+                    self.debug_eyes.value = f"Eyes: {eyes_closed}"
+                    
+                    # Cálculo de duración de ojos cerrados en frontend
+                    import time
+                    if eyes_closed == True:
+                        if self.eyes_closed_start is None:
+                            self.eyes_closed_start = time.time()
+                        eyes_duration = time.time() - self.eyes_closed_start
+                        eyes_closed_long = eyes_duration >= self.eyes_closed_threshold
+                    else:
+                        self.eyes_closed_start = None
+                        eyes_duration = 0.0
+                        eyes_closed_long = False
+                    
+                    self.debug_eyes_duration.value = f"Eyes Duration: {eyes_duration:.2f}s (Umbral: {eyes_closed_long})"
+                    
+                    # Face - verificar si realmente hay datos válidos
+                    face_detected = attention.get('face_detected', 'N/A')
+                    if face_detected == 'N/A' or face_detected is None:
+                        self.debug_face.value = "Face: No detectado"
+                    else:
+                        self.debug_face.value = f"Face: {face_detected}"
+                    
+                    # --- CALCULAR ATENCIÓN GENERAL EN FRONTEND ---
+                    # Obtener todas las variables del JSON
+                    head_yaw = abs(attention.get('head_yaw', 0.0))
+                    head_pitch = abs(attention.get('head_pitch', 0.0))
+                    head_roll = abs(attention.get('head_roll', 0.0))
+                    
+                    # Criterios para determinar atención
+                    max_angle = 20.0  # grados (mismo que backend)
+                    face_ok = face_detected == True
+                    head_ok = head_yaw < max_angle and head_pitch < max_angle and head_roll < max_angle
+                    eyes_ok = not eyes_closed_long  # Usar nuestro cálculo del umbral
+                    
+                    # Atención general
+                    in_attention = face_ok and head_ok and eyes_ok
+                    
+                    # Actualizar texto de atención
+                    if in_attention:
+                        self.attention_text.value = f"Atención: SÍ ({attention.get('timestamp', 0):.1f}s)"
                         self.attention_text.color = "#00FF00"
                     else:
-                        self.attention_text.value = f"Atención: NO ({attention.get('timestamp'):.1f}s)"
+                        self.attention_text.value = f"Atención: NO ({attention.get('timestamp', 0):.1f}s)"
                         self.attention_text.color = "#FF0000"
-
                 # update image in Flet
                 self.original_image_control.src_base64 = self.cv2_to_base64(original_image)
                 self.sketch_image_control.src_base64 = self.cv2_to_base64(sketch_image)
-
                 # update UI
                 self.page.update()
                 await asyncio.sleep(0.01)

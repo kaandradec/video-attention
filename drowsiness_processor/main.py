@@ -36,6 +36,34 @@ class DrowsinessDetectionSystem:
             sketch = self.visualizer.visualize_all_reports(sketch, drowsiness_features_processed)
             self.reports.main(drowsiness_features_processed)
             self.json_report = self.reports.generate_json_report(drowsiness_features_processed)
-            attention_result = self.attention_estimator.process(key_points)
+            # --- NUEVO: Determinar eyes_closed y face_detected ---
+            eyes_closed = False
+            if 'flicker_and_micro_sleep' in drowsiness_features_processed:
+                flicker_estimator = self.features_processing.features_drowsiness['flicker_and_micro_sleep']
+                eyes_distances = points_processed.get('eyes', {})
+                if hasattr(flicker_estimator, 'micro_sleep_detector'):
+                    eyes_closed = flicker_estimator.micro_sleep_detector.closed_eyes(eyes_distances)
+            face_detected = control_process
+            # Pasar head_yaw, head_pitch, head_roll a la lógica de atención
+            head_yaw = key_points.get('head_yaw', 0.0)
+            head_pitch = key_points.get('head_pitch', 0.0)
+            head_roll = key_points.get('head_roll', 0.0)
+            
+            attention_input = dict(key_points)
+
+            attention_input['eyes_closed'] = eyes_closed
+            attention_input['face_detected'] = face_detected
+            attention_input['head_yaw'] = head_yaw
+            attention_input['head_pitch'] = head_pitch
+            attention_input['head_roll'] = head_roll
+            attention_result = self.attention_estimator.process(attention_input)
+            # --- NUEVO: Agregar features de drowsiness al JSON de atención ---
+            # (solo los campos principales, puedes agregar más si lo deseas)
+            attention_result['flicker'] = drowsiness_features_processed.get('flicker_and_micro_sleep', {})
+            attention_result['micro_sleep'] = drowsiness_features_processed.get('flicker_and_micro_sleep', {})
+            attention_result['pitch'] = drowsiness_features_processed.get('pitch', {})
+            attention_result['yawn'] = drowsiness_features_processed.get('yawn', {})
+            attention_result['eye_rub_first_hand'] = drowsiness_features_processed.get('eye_rub_first_hand', {})
+            attention_result['eye_rub_second_hand'] = drowsiness_features_processed.get('eye_rub_second_hand', {})
             self.last_attention = attention_result
         return face_image, sketch, self.json_report, self.last_attention
