@@ -4,11 +4,31 @@ import json
 from datetime import datetime
 import boto3
 from botocore.client import Config
+from hdfs import InsecureClient
+import logging
 
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
 MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "reports")
+
+# Configuración de Hadoop HDFS
+HDFS_URL = os.environ.get("HDFS_URL", "http://namenode:9870")
+HDFS_USER = os.environ.get("HDFS_USER", "root")
+HDFS_REPORTS_PATH = os.environ.get("HDFS_REPORTS_PATH", "/video-attention/reports")
+USE_HDFS = os.environ.get("USE_HDFS", "false").lower() == "true"
+
+# Cliente HDFS
+hdfs_client = None
+if USE_HDFS:
+    try:
+        hdfs_client = InsecureClient(HDFS_URL, user=HDFS_USER)
+        # Crear directorio si no existe
+        if not hdfs_client.status(HDFS_REPORTS_PATH, strict=False):
+            hdfs_client.makedirs(HDFS_REPORTS_PATH)
+    except Exception as e:
+        logging.error(f"Error conectando a HDFS: {e}")
+        hdfs_client = None
 
 s3_client = boto3.client(
     's3',
@@ -44,9 +64,20 @@ class DrowsinessReports:
         with open(self.file_name, mode='w', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=self.fields)
             writer.writeheader()
+        
         # Subir a MinIO
         with open(self.file_name, 'rb') as file:
             s3_client.put_object(Bucket=MINIO_BUCKET, Key=os.path.basename(self.file_name), Body=file, ContentType='text/csv')
+        
+        # Subir a HDFS si está habilitado
+        if USE_HDFS and hdfs_client:
+            try:
+                hdfs_path = f"{HDFS_REPORTS_PATH}/{os.path.basename(self.file_name)}"
+                with open(self.file_name, 'rb') as local_file:
+                    hdfs_client.write(hdfs_path, local_file, overwrite=True)
+                logging.info(f"Archivo guardado en HDFS: {hdfs_path}")
+            except Exception as e:
+                logging.error(f"Error guardando en HDFS: {e}")
 
     def main(self, report_data: dict):
         if (report_data['eye_rub_first_hand']['eye_rub_report'] or

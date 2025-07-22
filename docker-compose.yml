@@ -41,10 +41,16 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_BUCKET=reports
+      - HDFS_URL=http://namenode:9870
+      - HDFS_USER=root
+      - HDFS_REPORTS_PATH=/video-attention/reports
+      - USE_HDFS=true
     ports:
       - "8000:8000"
     depends_on:
       - minio-storage
+      - namenode
+      - datanode
 
 volumes:
   hadoop_namenode:
